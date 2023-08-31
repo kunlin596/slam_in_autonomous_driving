@@ -249,8 +249,34 @@ bool ESKF<S>::Predict(const IMU& imu) {
     F.template block<3, 3>(6, 9) = -Mat3T::Identity() * dt;                        // theta 对 bg
 
     // mean and cov prediction
-    dx_ = F * dx_;  // 这行其实没必要算，dx_在重置之后应该为零，因此这步可以跳过，但F需要参与Cov部分计算，所以保留
+    // Pull out all values from error state vector.
+    VecT d_p = dx_.template block<3, 1>(0, 0);
+    VecT d_v = dx_.template block<3, 1>(3, 0);
+    VecT d_theta = dx_.template block<3, 1>(6, 0);
+    VecT d_bg = dx_.template block<3, 1>(9, 0);
+    VecT d_ba = dx_.template block<3, 1>(12, 0);
+    VecT d_g = dx_.template block<3, 1>(15, 0);
+
+    // Update p
+    dx_.template block<3, 1>(0, 0) = d_p + d_p * dt;
+
+    // Update v
+    dx_.template block<3, 1>(3, 0) =
+        // theta
+        d_v + -R_.matrix() * SO3::hat(imu.acce_ - ba_) * dt * d_theta +
+        // ba
+        -R_.matrix() * dt * d_ba +
+        // g
+        dt * d_g;
+
+    // Update theta
+    dx_.template block<3, 1>(6, 0) =
+        // theta
+        SO3::exp(-(imu.gyro_ - bg_) * dt).matrix() * d_theta +
+        // bg
+        -dt * d_bg;
     cov_ = F * cov_.eval() * F.transpose() + Q_;
+
     current_time_ = imu.timestamp_;
     return true;
 }
